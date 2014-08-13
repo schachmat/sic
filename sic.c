@@ -8,6 +8,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "gotr.h"
+
 static char *host = "irc.oftc.net";
 static char *port = "6667";
 static char *password;
@@ -16,7 +18,7 @@ static char bufin[4096];
 static char bufout[4096];
 static char channel[256];
 static time_t trespond;
-static FILE *srv;
+static FILE *srv = NULL;
 
 #include "util.c"
 
@@ -163,6 +165,7 @@ main(int argc, char *argv[]) {
 		}
 	}
 	/* init */
+	gotr_init();
 	i = dial(host, port);
 	srv = fdopen(i, "r+");
 	/* login */

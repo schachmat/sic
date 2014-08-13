@@ -9,7 +9,7 @@ MANPREFIX = ${PREFIX}/share/man
 
 # includes and libs
 INCS = -I. -I/usr/include
-LIBS = -L/usr/lib -lc
+LIBS = -L. -L/usr/lib -lc -lgotr -lgcrypt
 
 # flags
 CPPFLAGS = -DVERSION=\"${VERSION}\" -D_GNU_SOURCE

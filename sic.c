@@ -56,6 +56,30 @@ privmsg(char *channel, char *msg) {
 	sout("PRIVMSG %s :%s", channel, msg);
 }
 
+static int
+send_user(void* room, void* user, const char* message)
+{
+	const size_t nl = strlen(message) + strlen(room) + 2;
+	char *nm = malloc(nl);
+	snprintf(nm, nl, "%s %s", (char*)room, message);
+	sout("PRIVMSG %s :%s", (char*)user, nm);
+	free(nm);
+	return 1;
+}
+
+static int
+send_room(void* room, const char* message)
+{
+	sout("PRIVMSG %s :%s", (char*)room, message);
+	return 1;
+}
+
+static void
+receive_user(void *room, void *user, const char *message)
+{
+	pout((char*)room, "<%s> %s", (char*)user, message);
+}
+
 static void
 parsein(char *s) {
 	char c, *p;

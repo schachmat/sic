@@ -10,6 +10,14 @@
 
 #include "gotr.h"
 
+struct link {
+	char *name;
+	void *cls;
+	struct link* users;
+	struct link* next;
+};
+
+static struct link* rooms;
 static char *host = "irc.oftc.net";
 static char *port = "6667";
 static char *password;
@@ -46,14 +54,37 @@ sout(char *fmt, ...) {
 	fprintf(srv, "%s\r\n", bufout);
 }
 
-static void
-privmsg(char *channel, char *msg) {
-	if(channel[0] == '\0') {
-		pout("", "No channel to send to");
-		return;
-	}
-	pout(channel, "<%s> %s", nick, msg);
-	sout("PRIVMSG %s :%s", channel, msg);
+static struct link*
+lget(struct link* first, const char* name)
+{
+	struct link* cur;
+	for (cur = first; cur; cur = cur->next)
+		if (!strcmp(cur->name, name))
+			return cur;
+	return NULL;
+}
+
+static void*
+derive(const struct link* first, const char* name)
+{
+	const struct link *cur;
+	for (cur = first; cur; cur = cur->next)
+		if (!strcmp(cur->name, name))
+			return cur->cls;
+	return NULL;
+}
+
+static struct link*
+lrem(struct link** first, const char* name)
+{
+	struct link* cur;
+	struct link** prev = first;
+	for (cur = *first; cur; prev = &(cur->next), cur = cur->next)
+		if (!strcmp(name, cur->name)) {
+			*prev = cur->next;
+			return cur;
+		}
+	return NULL;
 }
 
 static int
@@ -77,7 +108,20 @@ send_room(void* room, const char* message)
 static void
 receive_user(void *room, void *user, const char *message)
 {
-	pout((char*)room, "<%s> %s", (char*)user, message);
+	pout((char*)room, "<%s> \033[32m%s\033[0m", (char*)user, message);
+}
+
+static void
+privmsg(char *channel, char *msg) {
+	if(channel[0] == '\0') {
+		pout("", "No channel to send to");
+		return;
+	} else if(channel[0] == '#') {
+		gotr_send(derive(rooms, channel), msg);
+	} else {
+		sout("PRIVMSG %s :%s", channel, msg);
+	}
+	pout(channel, "<%s> %s", nick, msg);
 }
 
 static void
@@ -118,6 +162,15 @@ parsein(char *s) {
 				*p++ = '\0';
 			privmsg(s, p);
 			return;
+		case 'r':
+			s = eat(p, isspace, 1);
+			p = eat(s, isspace, 0);
+			if(!*s)
+				s = channel;
+			if(*p)
+				*p++ = '\0';
+			gotr_rekey(derive(rooms, s), NULL);
+			return;
 		case 's':
 			strlcpy(channel, p, sizeof channel);
 			return;
@@ -129,6 +182,9 @@ parsein(char *s) {
 static void
 parsesrv(char *cmd) {
 	char *usr, *par, *txt;
+	struct link* lnk;
+	struct link* room;
+	struct gotr_user* user;
 
 	usr = host;
 	if(!cmd || !*cmd)
@@ -146,12 +202,77 @@ parsesrv(char *cmd) {
 	trim(par);
 	if(!strcmp("PONG", cmd))
 		return;
-	if(!strcmp("PRIVMSG", cmd))
-		pout(par, "<%s> %s", usr, txt);
-	else if(!strcmp("PING", cmd))
+	if(!strcmp("PRIVMSG", cmd)) {
+//		pout(par, "<%s> %s", usr, txt);
+		if(txt[0] == '#') {
+			par = txt;
+			txt = skip(eat(par, isspace, 0), ' ');
+			if (!(room = lget(rooms, par)))
+				return;
+			if (!(user = derive(room->users, usr))) {
+				lnk = malloc(sizeof(struct link));
+				lnk->name = malloc(strlen(usr) + 1);
+				strncpy(lnk->name, usr, strlen(usr) + 1);
+				lnk->next = room->users;
+				if ((lnk->cls = gotr_receive_user(room->cls, NULL, lnk->name, txt))) {
+					room->users = lnk;
+				} else {
+					free(lnk->name);
+					free(lnk);
+				}
+			} else {
+				gotr_receive_user(room->cls, user, usr, txt);
+			}
+		} else {
+			gotr_receive(derive(rooms, par), txt);
+		}
+	} else if(!strcmp("PING", cmd)) {
 		sout("PONG %s", txt);
-	else {
+	} else {
 		pout(usr, ">< %s (%s): %s", cmd, par, txt);
+		if (!strcmp(usr, nick) && !strcmp("JOIN", cmd)) {
+			pout(txt, "joining");
+			lnk = malloc(sizeof(struct link));
+			lnk->users = NULL;
+			lnk->name = malloc(strlen(txt) + 1);
+			strncpy(lnk->name, txt, strlen(txt) + 1);
+			lnk->next = rooms;
+			if ((lnk->cls = gotr_join(&send_room, &send_user, &receive_user, lnk->name, NULL))) {
+				rooms = lnk;
+			} else {
+				free(lnk->name);
+				free(lnk);
+			}
+		} else if (!strcmp("JOIN", cmd)) {
+			pout(txt, "%s joined", usr);
+			if (!(room = lget(rooms, txt)))
+				return;
+			lnk = malloc(sizeof(struct link));
+			lnk->users = NULL;
+			lnk->name = malloc(strlen(usr) + 1);
+			strncpy(lnk->name, usr, strlen(usr) + 1);
+			lnk->next = room->users;
+			if ((lnk->cls = gotr_user_joined(derive(rooms, txt), lnk->name))) {
+				room->users = lnk;
+			} else {
+				free(lnk->name);
+				free(lnk);
+			}
+		} else if (!strcmp(usr, nick) && !strcmp("PART", cmd)) {
+			pout(par, "leaving");
+			lnk = lrem(&rooms, par);
+			gotr_leave(lnk->cls);
+			free(lnk->name);
+			free(lnk);
+		} else if (!strcmp("PART", cmd)) {
+			pout(par, "%s left", usr);
+			if (!(room = lget(rooms, par)))
+				return;
+			lnk = lrem(&room->users, usr);
+			gotr_user_left(room->cls, lnk->cls);
+			free(lnk->name);
+			free(lnk);
+		}
 		if(!strcmp("NICK", cmd) && !strcmp(usr, nick))
 			strlcpy(nick, txt, sizeof nick);
 	}

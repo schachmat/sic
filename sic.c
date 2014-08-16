@@ -121,7 +121,6 @@ privmsg(char *channel, char *msg) {
 	} else {
 		sout("PRIVMSG %s :%s", channel, msg);
 	}
-	pout(channel, "<%s> %s", nick, msg);
 }
 
 static void
@@ -203,7 +202,6 @@ parsesrv(char *cmd) {
 	if(!strcmp("PONG", cmd))
 		return;
 	if(!strcmp("PRIVMSG", cmd)) {
-//		pout(par, "<%s> %s", usr, txt);
 		if(txt[0] == '#') {
 			par = txt;
 			txt = skip(eat(par, isspace, 0), ' ');
@@ -258,13 +256,13 @@ parsesrv(char *cmd) {
 				free(lnk->name);
 				free(lnk);
 			}
-		} else if (!strcmp(usr, nick) && !strcmp("PART", cmd)) {
+		} else if (!strcmp(usr, nick) && (!strcmp("PART", cmd) || !strcmp("QUIT", cmd))) {
 			pout(par, "leaving");
 			lnk = lrem(&rooms, par);
 			gotr_leave(lnk->cls);
 			free(lnk->name);
 			free(lnk);
-		} else if (!strcmp("PART", cmd)) {
+		} else if (!strcmp("PART", cmd) || !strcmp("QUIT", cmd)) {
 			pout(par, "%s left", usr);
 			if (!(room = lget(rooms, par)))
 				return;
